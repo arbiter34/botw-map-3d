@@ -1,5 +1,6 @@
 'use strict';
 
+
 /**
  *
  * @constructor
@@ -15,7 +16,7 @@ function BotwHeightMap() {
 
         // Make sure the browser and gpu support WebGL
         if (this.isWebGLSupported()) {
-            this.init();
+            this.pre();
         } else {
             // Make warning message visible
             document.querySelector('#webgl').className = 'no-webgl';
@@ -42,7 +43,19 @@ BotwHeightMap.prototype.isWebGLSupported = function () {
  * init
  * Sets up required data for Three.js including scene, camera and renderer
  */
-BotwHeightMap.prototype.init = function () {
+BotwHeightMap.prototype.pre = function () {
+    var that = this;
+    $.get({url: "/mubin",
+           success: function(data) {
+                that.init(JSON.parse(data));
+           },
+            error: function() {
+                that.init();
+            }
+    });
+};
+
+BotwHeightMap.prototype.init = function(mubin) {
     var that = this;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 500);
@@ -89,15 +102,56 @@ BotwHeightMap.prototype.init = function () {
         that.onKeyUp(event);
     }, false);
 
+    if (mubin) {
+        var items = [];
+        recurse(this, items, mubin.root);
+    }
+
     var img = new Image();
     img.onload = function () {
         var data = that.getHeightData(img, that.heightMapScale);
-        that.generateHeightmapMesh(data);
+        that.generateHeightmapMesh(data, items);
     };
     img.src = this.heightMap;
 
     this.setScene();
 };
+
+var recurse = function(that, items, root) {
+    for (var property in root) {
+        if (root.hasOwnProperty(property)) {
+            var item = root[property];
+            if (item.hasOwnProperty("Translate")) {
+                items[items.length] = item;
+            } else {
+                recurse(that, items, item);
+            }
+        }
+    }
+};
+
+BotwHeightMap.prototype.addItems = function (items) {
+    var geometry = new THREE.CubeGeometry();
+
+    for (var i = 0; i < items.length; i++) {
+        if (!items[i].hasOwnProperty("Translate")) {
+            continue;
+        }
+        var point = new THREE.Vector3();
+        point.x = items[i].Translate.X.value;
+        point.y = items[i].Translate.Y.value;
+        point.z = items[i].Translate.Z.value;
+
+        geometry.vertices.push( point );
+
+    }
+
+    var geometryMat = new THREE.PointsMaterial( { color: 0x888888 } );
+
+    var geometryField = new THREE.Points( geometry, geometryMat );
+    this.scene.add(geometryField);
+};
+
 
 /**
  * Adds background, fog and lights to the scene
@@ -169,8 +223,33 @@ BotwHeightMap.prototype.getHeightData = function (img, scale) {
     return data;
 };
 
-BotwHeightMap.prototype.generateHeightmapMesh = function (data) {
+BotwHeightMap.prototype.generateHeightmapMesh = function (data, items) {
     var geometry = new THREE.PlaneGeometry(256, 256, 1023, 1023);
+    var pointCloudGeometry = new THREE.BufferGeometry();
+
+    var pointSize = 0.1;
+    var positions = new Float32Array( items.length *3 );
+    var colors = new Float32Array( items.length *3 );
+
+    for( var i = 0; i < items.length; i++ ) {
+            var x = items[i].Translate.X.value;
+            var y = items[i].Translate.Y.value;
+            var z = items[i].Translate.Z.value;
+            positions[ 3 * i ] = x;
+            positions[ 3 * i + 1 ] = y;
+            positions[ 3 * i + 2 ] = z;
+            colors[ 3 * i ] = 254;
+            colors[ 3 * i + 1 ] = 0;
+            colors[ 3 * i + 2 ] = 0;
+    }
+    pointCloudGeometry.addAttribute( 'position', new THREE.BufferAttribute( positions, 3 ) );
+    pointCloudGeometry.addAttribute( 'color', new THREE.BufferAttribute( colors, 3 ) );
+    pointCloudGeometry.computeBoundingBox();
+    var material = new THREE.PointsMaterial( { size: pointSize, vertexColors: THREE.VertexColors } )
+    var pointcloud = new THREE.Points( geometry, material );
+    pointcloud.scale.set(1, 1, 1);
+    pointcloud.position.set(0, 0, 0);
+    //this.scene.add(pointcloud);
 
     var that = this;
     var texture = THREE.ImageUtils.loadTexture(this.heightMapTexture, {}, function () {
